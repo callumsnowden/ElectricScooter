@@ -1,4 +1,8 @@
 #include <Servo.h>
+#include "FastLED.h"
+
+#define NUM_LEDS 8
+#define LED_PIN 10
 
 #define THROTTLE_SAMPLES 10
 #define THROTTLE_DTIME 2
@@ -11,7 +15,7 @@
 #define THROTTLE_PIN 0
 
 //max percentage of output at max throttle, essentially a "power limit"
-#define THROTTLE_MAXP 60
+#define THROTTLE_MAXP 100
 
 //throttle min and hysteresis value for where the power should start being applied
 int throttleMin = 0;
@@ -20,10 +24,18 @@ int throttleMinHyst = 8;
 int throttleMax = 0;
 int throttleMaxHyst = 8;
 
+int currentThrottlePercentage = 0;
+
 Servo ESC;
+CRGB leds[NUM_LEDS];
 
 void setup() {
   Serial.begin(9600);
+  FastLED.addLeds<WS2812, LED_PIN>(leds, NUM_LEDS);
+  for(int i = 0; i < 8; i++) {
+    leds[i] = CRGB(0, 0, 0); //off
+  }
+  FastLED.show();
   ESC.attach(9);
   armESC();
 }
@@ -70,9 +82,17 @@ uint8_t dealWithThrottle() {
 
 void loop() {
   //print current throttle value for debugging
-  Serial.print("ThCur%: "); Serial.print(dealWithThrottle()); Serial.print(", ");
+  Serial.print("ThCur%: "); Serial.print(currentThrottlePercentage); Serial.print(", ");
 
+  currentThrottlePercentage = dealWithThrottle();
+  
   //set motor output based on throttle processing
-  writeSpeed(dealWithThrottle());
+  writeSpeed(currentThrottlePercentage);
+  /*
+  for(int i = 0; i < NUM_LEDS - 1; i++) {
+    leds[i].setHue(map(currentThrottlePercentage, 0, 100, 0, 254));
+  }
+  FastLED.show();
+  */
   delay(50);
 }
