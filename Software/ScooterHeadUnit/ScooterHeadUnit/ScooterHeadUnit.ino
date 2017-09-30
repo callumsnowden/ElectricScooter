@@ -37,13 +37,22 @@ void loop() {
   if (RS485.available()) {
     if (RS485.read() == 0xAA) {
       digitalWrite(13, HIGH);
-      for (uint8_t i = 0; i < 8; i++) {
+      for (uint8_t i = 0; i < 9; i++) {
         rxBuffer[i] = RS485.read();
       }
-      Serial.println("Pkt!");
-      lcd.clear();
-      lcd.print("Thr%: ");
-      lcd.println(rxBuffer[0]);
+
+      //if (rxBuffer[8] == 0x55) {
+        Serial.println("Pkt!");
+        lcd.clear();
+        lcd.print("Thr%: ");
+        uint8_t throttlePercent = rxBuffer[0];
+        lcd.print(throttlePercent);
+
+        lcd.setCursor(0, 1);
+        
+        lcd.print("CurA: ");
+        lcd.print(rxBuffer[1]);
+      //}
     }
     digitalWrite(13, LOW);
   }

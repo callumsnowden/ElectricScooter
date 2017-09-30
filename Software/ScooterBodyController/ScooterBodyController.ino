@@ -1,5 +1,5 @@
 #include <SoftwareSerial.h>
-#include <Servo.h>
+#include <ServoTimer1.h>
 #include "FastLED.h"
 
 /*
@@ -8,12 +8,12 @@
  * D10 - LEDs - green
  * D11 - Status LED - red
  * D12 - Safety switch - brown
- * 
+ *
  * RS485 Pins
  * D5 - RS485 Control
  * D7 - RS485 DI - Tx
  * D8 - RS485 DO - Rx
- * 
+ *
  * A0 - Throttle - blue
  * A1 - Motor Temp - turquoise
  * A2 - ESC Temp - purple
@@ -68,13 +68,15 @@ uint8_t throttleMax = 0;
 uint8_t throttleMaxHyst = 8;
 
 uint8_t currentThrottlePercentage = 0;
+uint8_t current = 0;
+uint16_t escPosition = 0;
 
 //vcc of arduino, useful in true analogue calculations such as for temperature and voltage measurement
 float vcc = 0;
 
 SoftwareSerial RS485(RS485_RX, RS485_TX);
 
-Servo ESC;
+ServoTimer1 ESC;
 CRGB leds[NUM_LEDS];
 
 CRGB statusLed[1];
@@ -88,7 +90,8 @@ void setup() {
   analogWrite(6, 200);
   FastLED.addLeds<WS2811, STATUS_LED, GRB>(statusLed, 1);
   setStatusColour(CRGB::Red);
-  Serial.begin(9600);
+  
+  Serial.begin(115200);
   pinMode(RS485_CONTROL, OUTPUT);
   digitalWrite(RS485_CONTROL, HIGH); //put into receive mode
   RS485.begin(57600);
@@ -107,13 +110,16 @@ void setup() {
     digitalWrite(RS485_CONTROL, LOW);
 
     if(RS485.available()) {
-      
+
     }
   }
   */
-  
+
   pinMode(SAFETY_SWITCH, INPUT_PULLUP);
   ESC.attach(9);
+  ESC.setMinimumPulse(1000);
+  ESC.setMaximumPulse(2000);
+  
   setStatusColour(CRGB::Orange);
   armESC();
   setStatusColour(CRGB::Green);
@@ -130,13 +136,13 @@ void readVcc() {
     ADMUX = _BV(MUX3) | _BV(MUX2);
   #else
     ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
-  #endif  
+  #endif
 
   delay(2); // Wait for Vref to settle
   ADCSRA |= _BV(ADSC); // Start conversion
   while (bit_is_set(ADCSRA,ADSC)); // measuring
 
-  uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
+  uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH
   uint8_t high = ADCH; // unlocks both
 
   long result = (high<<8) | low;
@@ -149,15 +155,21 @@ void readVcc() {
 void armESC() {
   Serial.println("Arming ESC");
   //1ms pulse for 2s arms the esc properly
-  ESC.writeMicroseconds(1000);
+  ESC.write(0);
   delay(2000);
   readVcc(); //everything has roughly settled at this point, read vcc
-  Serial.print("SupplyV: ");
-  Serial.println(vcc);
+  Serial.print("SupplyV,ThrPos,SupplyCurrent");
 }
 
 uint8_t readBusVoltage(uint16_t analog) {
   //fill in
+}
+
+uint8_t readCurrent(uint8_t pin) {
+  uint16_t value = analogRead(pin);
+  float voltage = (value * (vcc / 1024.0)) - 2.5;
+  uint8_t current = voltage / 0.02;
+  return current;
 }
 
 uint8_t readTemp(uint8_t pin) {
@@ -168,13 +180,14 @@ uint8_t readTemp(uint8_t pin) {
 }
 
 void writeSpeed(uint8_t percent) {
-  uint16_t escPosition = 0;
+  //uint16_t escPosition = 0;
   //map between 1ms and 2ms, any less/more doesn't work and makes esc throw a hissy fit
-  escPosition = map(percent, 0, 100, 1000, 2000);
+  escPosition = map(percent, 0, 100, 0, 180);
+  ESC.write(escPosition);
 
   //print debugging info
-  Serial.print("ESC: "); Serial.print(escPosition); Serial.println();
-  ESC.writeMicroseconds(escPosition);
+  //Serial.print("ESC: "); Serial.print(escPosition); Serial.println();
+  //ESC.writeMicroseconds(escPosition);
 }
 
 uint8_t dealWithThrottle() {
@@ -189,7 +202,7 @@ uint8_t dealWithThrottle() {
 
   //convert to actual value
   uint16_t currentThrottle = average / THROTTLE_SAMPLES; //up to 1024 which is adc max value
-  
+
   //map throttle to value between 0-THROTTLE_MAXP%
   uint8_t throttlePercentage = 0; //up to 100% but dependant on THROTTLE_MAXP
   if(currentThrottle < THROTTLE_MIN) currentThrottle = THROTTLE_MIN; //if we're below THROTTLE_MIN set to THROTTLE_MIN, eliminates noise based error
@@ -202,14 +215,14 @@ uint8_t dealWithThrottle() {
 
 void loop() {
   //print current throttle value for debugging
-  Serial.print("ThCur%: "); Serial.println(currentThrottlePercentage);
-
   currentThrottlePercentage = dealWithThrottle();
-  
+
   //set motor output based on throttle processing
   writeSpeed(currentThrottlePercentage);
 
-  uint8_t pkt[10] = {0xAA, currentThrottlePercentage, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x55};
+  current = readCurrent(MOTORTEMP_PIN);
+
+  uint8_t pkt[10] = {0xAA, currentThrottlePercentage, current, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x55};
 
   RS485.write(pkt, sizeof(pkt));
   /*
@@ -218,5 +231,8 @@ void loop() {
   }
   FastLED.show();
   */
+
+  Serial.print(vcc);Serial.print(",");Serial.println(current);
+  //Serial.println(escPosition);
   delay(10);
 }
